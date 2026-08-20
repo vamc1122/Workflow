@@ -1,0 +1,518 @@
+T-codes: 
+  swia  status
+  sbwp  inbox
+  sm50  debugg (work process)
+  swo1  bor 
+  swdd  workflow builder
+  swue  create event 
+SWETYPV event type link 
+ SWELS  trace on/off
+ 
+Create Flow chart in SWDD: 
+ 
+
+Create Workflow Containers : 
+agent : PA0105-USRID_LONG and properties: check import and export 
+user : WFSYST-AGENT and properties: check import and export.
+ 
+
+
+
+Create  a BOR and methods and events and parameters against all:
+T-code : swo1
+ 
+
+events parameters: 
+ 
+
+
+
+
+
+
+
+Event Type Linkage : 
+Create event :
+T-code : SWUE
+ 
+T-code : SWETYPV
+It will ask customization request and moved Dev testing for test  Eg : 100 t0 200
+ 
+
+Create a Binding in the Header : 
+ 
+Binding :  From  event container  to workflow container
+ 
+Create a Task for Activity:
+ 
+Create a Task Containers Elements :
+ 
+Binding :
+ 
+
+User Decision:
+ 
+To check Trace On\Off : SWELS 
+To Check SAP Inbox : t-code -> sbwp
+t-code for debugg : sm50.
+To Debugg : In method user this expression and in debug give b = X.
+*DATA : a,b.
+*a = 'X'.
+*DO .
+*if b = a.
+*  exit.
+*ENDIF.
+*ENDDO.
+
+
+
+
+Method Logic :
+
+begin_method fetch_mailid changing container.
+
+TYPES: BEGIN OF ty_resb,
+         aufnr  TYPE aufnr,
+         rsnum  TYPE rsnum,
+         rspos  TYPE rspos,
+         bdmng  TYPE bdmng,
+         gpreis TYPE ppcomp,
+       END OF ty_resb.
+DATA : user TYPE wfsyst-agent.
+DATA : agent TYPE pa0105-usrid_long.
+DATA : ls_mtable TYPE zspare_cons_str.
+DATA : lt_mtable TYPE zspare_cons_tt.
+DATA: it_resb TYPE TABLE OF ty_resb, wa_resb TYPE ty_resb.
+DATA : order TYPE aufk-aufnr.
+DATA: it_final TYPE TABLE OF zspare_cons_appr,
+      wa_final TYPE zspare_cons_appr.
+
+REFRESH : it_final,it_resb,lt_mtable.
+CLEAR : wa_resb,wa_final,ls_mtable.
+
+*DATA : a,b.
+*a = 'X'.
+*DO .
+*if b = a.
+*  exit.
+*ENDIF.
+*ENDDO.
+
+swc_get_element container 'Order' order.
+swc_get_element container 'agent' agent.
+
+
+CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+  EXPORTING
+    input         = order
+ IMPORTING
+   OUTPUT        = order
+          .
+
+SELECT aufnr rsnum rspos bdmng gpreis FROM resb INTO TABLE it_resb
+     WHERE aufnr = order.
+LOOP AT it_resb INTO wa_resb.
+  CLEAR ls_mtable.
+  wa_final-mandt        = sy-mandt.
+  ls_mtable-order_no     = wa_resb-aufnr.
+  wa_final-order_no     = wa_resb-aufnr.
+  ls_mtable-reservation  = wa_resb-rsnum.
+  wa_final-reservation  = wa_resb-rsnum.
+  ls_mtable-item         = wa_resb-rspos.
+  wa_final-item         = wa_resb-rspos.
+  ls_mtable-cost         = wa_resb-bdmng * wa_resb-gpreis.
+  wa_final-cost         = ls_mtable-cost.
+  IF ls_mtable-cost < 100000.
+    CONTINUE.
+  ENDIF.
+  wa_final-status       = 'In Progress'.
+  wa_final-created_on   = sy-datum.
+  wa_final-created_time = sy-uzeit.
+  APPEND wa_final TO it_final.
+  APPEND ls_mtable TO lt_mtable.
+ENDLOOP.
+
+
+*Sent Mail with table format in Body
+*All the diclarations to send the email is same for this also
+*except that diclare the doc type specify as HTML
+DATA:
+*- Structure to hold Output Details in delimited format
+  gf_output_soli TYPE  soli,
+*- Structure to hold Imported Object Components
+  gf_objpack     TYPE sopcklsti1,
+*- Structure to hold data in single line format
+  gf_objhead     TYPE solisti1,
+*- Structure to hold data in single line format
+  gf_objtxt      TYPE solisti1,
+*- Structure to hold data for API Recipient List
+  gf_reclist     TYPE somlreci1,
+*- Structure to hold  email data
+  gf_doc_chng    TYPE sodocchgi1,
+*- Internal Table to hold Output Details in delimited format
+  gt_output_soli TYPE TABLE OF soli,
+*- Internal Table to hold Imported Object Components
+  gt_objpack     TYPE TABLE OF sopcklsti1,
+*- Internal Table to hold data in single line format
+  gt_objhead     TYPE TABLE OF solisti1,
+*- Internal Table to hold data in single line format
+  gt_objtxt      TYPE TABLE OF solisti1,
+*- Internal Table to hold data for API Recipient List
+  gt_reclist     TYPE TABLE OF somlreci1.
+
+DATA : gv_menge1     TYPE char20.
+DATA : lv_zminbe     TYPE char20.
+DATA : lv_menge1     TYPE char20.
+
+
+
+DATA: g_lines        TYPE sy-tabix,  "To hold number of records
+      g_msg_lines    TYPE sy-tabix,  "To hold number of records
+      g_sent_all     TYPE sonv-flag,
+      sender_address TYPE soextreci1-receiver.
+
+CONSTANTS : gc_doc_type_htm(3) TYPE c VALUE 'HTM',   "Code for document class
+            gc_rec_type        TYPE c VALUE 'U',         "Recipient type
+            gc_express         TYPE c VALUE 'X'.
+CLEAR : gf_objtxt ,gt_objpack,gt_objhead,gt_objtxt,gt_reclist.
+*Set the Subject line
+CONCATENATE sy-datum+6(2) sy-datum+4(2) sy-datum+0(4) INTO DATA(date) SEPARATED BY '.'.
+CONCATENATE 'Approval for Spare Values Consumption Agaianst Order' order INTO gf_doc_chng-obj_descr.
+
+*Set the Body background colour
+gf_objtxt-line = '<body bgcolor = "#E6E6FA">'.
+*- Append
+APPEND gf_objtxt TO gt_objtxt.
+*- Clear
+CLEAR gf_objtxt.
+*Set font color and its type
+CONCATENATE '<FONT COLOR = "#191970" face="Garamond">' '<b>' INTO gf_objtxt-line.
+*- Append
+APPEND gf_objtxt TO gt_objtxt.
+*- Clear
+CLEAR gf_objtxt.
+
+*Prepare mail body
+CONCATENATE '<p>' 'Dear Manager,' '</p>'
+            INTO gf_objtxt-line.
+*- Append
+APPEND gf_objtxt TO gt_objtxt.
+*- Clear
+CLEAR gf_objtxt.
+gf_objtxt-line = space.
+*- Append
+APPEND gf_objtxt TO gt_objtxt.
+*- Clear
+CLEAR gf_objtxt.
+
+CONCATENATE '<p>'
+            'Please approve consumption of below component in PM order with transaction and need urgent attention.'
+            '</p>'
+               INTO gf_objtxt-line SEPARATED BY space.
+APPEND gf_objtxt TO gt_objtxt.
+CLEAR  gf_objtxt.
+gf_objtxt-line = '<left>'.  "'<center>'.
+APPEND gf_objtxt TO gt_objtxt.
+CLEAR  gf_objtxt.
+
+*  Pripare data in table format to dispay in Mail body
+gf_objtxt-line = '<TABLE  width= "100%" align = "LEFT" border="1">'.
+APPEND gf_objtxt TO gt_objtxt.
+CLEAR  gf_objtxt.
+
+CONCATENATE '<TR ><td align = "LEFT" BGCOLOR = "#708090">'
+            '<FONT COLOR = "BLACK"><B>Order Number</B> </FONT>'
+              '</td>'  INTO gf_objtxt-line.
+APPEND gf_objtxt TO gt_objtxt.
+CLEAR  gf_objtxt.
+
+CONCATENATE '<td align = "LEFT" BGCOLOR = "#708090">'             "+RA23032022
+          '<FONT COLOR = "BLACK"><B>Reservation No.</B> </FONT>'
+            '</td>'  INTO gf_objtxt-line.
+APPEND gf_objtxt TO gt_objtxt.
+CLEAR  gf_objtxt.
+
+
+CONCATENATE '<td align = "LEFT" BGCOLOR = "#708090">'
+            '<FONT COLOR = "BLACK"><B>Item No.</B> </FONT>'
+              '</td>'  INTO gf_objtxt-line.
+APPEND gf_objtxt TO gt_objtxt.
+CLEAR  gf_objtxt.
+
+CONCATENATE '<td align = "LEFT" BGCOLOR = "#708090">'
+            '<FONT COLOR = "BLACK"><B>Cost</B> </FONT>'
+              '</td>'  INTO gf_objtxt-line.
+APPEND gf_objtxt TO gt_objtxt.
+CLEAR  gf_objtxt.
+*
+*CONCATENATE '<td align = "LEFT" BGCOLOR = "#708090">'
+*            '<FONT COLOR = "BLACK"><B>Status</B> </FONT>'
+*              '</td>'  INTO gf_objtxt-line.
+*APPEND gf_objtxt TO gt_objtxt.
+*CLEAR  gf_objtxt.
+
+LOOP AT lt_mtable INTO ls_mtable.
+
+  CLEAR : gv_menge1.
+
+  WRITE ls_mtable-cost  TO lv_zminbe.
+*    write wa_final-zmenge  to lv_zmenge.
+*    write wa_final-dfc_qty to lv_dfc_qty.
+*    write wa_final-ocdqty_su to lv_ocdqty_su.
+*
+  SPLIT lv_zminbe AT '.'  INTO gv_menge1 lv_menge1.
+*    split lv_zmenge at '.'  into gv_menge2 lv_menge2.
+*    split lv_dfc_qty at '.' into gv_menge3 lv_menge3.
+*    split lv_ocdqty_su at '.' into gv_menge4 lv_menge4.
+*
+*    concatenate wa_final-fkdat+6(2) wa_final-fkdat+4(2) wa_final-fkdat+0(4) into lv_date separated by '.'.
+*    if lv_date = '00.00.0000'.
+*      lv_date = ''.
+*    endif.
+
+  CONCATENATE '<TR><td align = "LEFT">'
+              '<FONT COLOR = "BLACK">'ls_mtable-order_no'</FONT>'
+              '</td>'  INTO gf_objtxt-line.
+  APPEND gf_objtxt TO gt_objtxt.
+  CLEAR  gf_objtxt.
+
+
+  CONCATENATE '<td align = "LEFT">'
+              '<FONT COLOR = "BLACK">'ls_mtable-reservation'</FONT>'
+                '</td>'  INTO gf_objtxt-line.
+  APPEND gf_objtxt TO gt_objtxt.
+  CLEAR  gf_objtxt.
+
+  CONCATENATE '<td align = "LEFT">'
+              '<FONT COLOR = "BLACK">'ls_mtable-item'</FONT>'
+                '</td>'  INTO gf_objtxt-line.
+  APPEND gf_objtxt TO gt_objtxt.
+  CLEAR  gf_objtxt.
+
+  CONCATENATE '<td align = "LEFT">'
+              '<FONT COLOR = "BLACK">'gv_menge1'</FONT>'
+                '</td>'  INTO gf_objtxt-line.
+  APPEND gf_objtxt TO gt_objtxt.
+
+*  CONCATENATE '<td align = "LEFT">'
+*              '<FONT COLOR = "BLACK">'wa_final-status'</FONT>'
+*                '</td>'  INTO gf_objtxt-line.
+*  APPEND gf_objtxt TO gt_objtxt.
+
+  CLEAR  gf_objtxt.
+  CLEAR : ls_mtable.
+ENDLOOP.
+
+gf_objtxt-line = '</TABLE>'.
+APPEND gf_objtxt TO gt_objtxt.
+CLEAR  gf_objtxt.
+gf_objtxt-line = '</left>'.  "'</center>'.
+APPEND gf_objtxt TO gt_objtxt.
+CLEAR  gf_objtxt.
+
+*  CONCATENATE '<p>' ' Please confirm the appropriate actions'
+*                       'have taken place in regards to this change'
+*                 '</p>'
+*                 INTO gf_objtxt-line SEPARATED BY space.
+*  APPEND gf_objtxt TO gt_objtxt.
+*  CLEAR  gf_objtxt.
+*
+*  CONCATENATE '<p>' ' For further questions, please contact system administrator'
+*                 '</p>'
+*                 INTO gf_objtxt-line SEPARATED BY space.
+*  APPEND gf_objtxt TO gt_objtxt.
+*  CLEAR gf_objtxt.
+gf_objtxt-line = space.  "'<center>'.
+APPEND gf_objtxt TO gt_objtxt.
+CLEAR  gf_objtxt.
+
+
+gf_objtxt-line = space.  "'<center>'.
+APPEND gf_objtxt TO gt_objtxt.
+CLEAR  gf_objtxt.
+
+
+gf_objtxt-line =   'Regards,<br />'.
+APPEND gf_objtxt TO gt_objtxt.
+CLEAR gf_objtxt.
+gf_objtxt-line =   'Arjas Steel Pvt Ltd.<br />'.
+APPEND gf_objtxt TO gt_objtxt.
+CLEAR gf_objtxt.
+gf_objtxt-line = '<br><br><b><center><i><font color = "RED">*This is an auto generated Email.'.
+APPEND gf_objtxt TO gt_objtxt.
+CLEAR gf_objtxt.
+gf_objtxt-line = '</FONT></body>'.
+*- Append
+APPEND gf_objtxt TO gt_objtxt.
+*- Clear
+CLEAR gf_objtxt.
+
+DESCRIBE TABLE gt_objtxt LINES g_msg_lines.
+READ TABLE gt_objtxt INTO gf_objtxt INDEX g_msg_lines.
+gf_doc_chng-doc_size = ( g_msg_lines - 1 ) * 255 + strlen( gf_objtxt ).
+*- Creation of the entry for the compressed document
+gf_objpack-transf_bin = ' '.
+gf_objpack-head_start = 1.
+gf_objpack-head_num   = 0.
+gf_objpack-body_start = 1.
+gf_objpack-body_num   = g_msg_lines.
+gf_objpack-doc_type   = gc_doc_type_htm.
+*- Append
+APPEND gf_objpack TO gt_objpack.
+*- Clear
+CLEAR gf_objpack.
+
+*- Creation of the document attachment
+*- Describe
+DESCRIBE TABLE gt_output_soli LINES g_lines.
+*- Don't create attachment if no data is present
+IF g_lines <> 0.
+  LOOP AT gt_output_soli INTO gf_output_soli.
+    gf_objtxt = gf_output_soli.
+*- Append
+    APPEND gf_objtxt TO gt_objtxt.
+*- Clear
+    CLEAR gf_objtxt.
+  ENDLOOP.
+ENDIF.
+
+**- Completing the recipient list
+*  LOOP AT s_mailid.
+*gf_reclist-receiver = 'mudunuri.vamsikrishnaraju@arjas.com'.
+gf_reclist-receiver = agent.
+gf_reclist-rec_type = gc_rec_type.
+gf_reclist-express  = gc_express.
+**- Append
+APPEND gf_reclist TO gt_reclist.
+**- Clear
+*    CLEAR gf_reclist.
+*  ENDLOOP.
+
+sender_address = sy-uname.
+
+CALL FUNCTION 'SO_DOCUMENT_SEND_API1'
+  EXPORTING
+    document_data              = gf_doc_chng
+    put_in_outbox              = g_sent_all
+    sender_address             = sender_address
+    commit_work                = 'X'
+  IMPORTING
+    sent_to_all                = g_sent_all
+  TABLES
+    packing_list               = gt_objpack
+    object_header              = gt_objhead
+    contents_txt               = gt_objtxt
+    receivers                  = gt_reclist
+  EXCEPTIONS
+    too_many_receivers         = 1
+    document_not_sent          = 2
+    document_type_not_exist    = 3
+    operation_no_authorization = 4
+    parameter_error            = 5
+    x_error                    = 6
+    enqueue_error              = 7
+    OTHERS                     = 8.
+IF sy-subrc = 0.
+  cl_os_transaction_end_notifier=>raise_commit_requested( ).
+  CALL FUNCTION 'DB_COMMIT'.
+  cl_os_transaction_end_notifier=>raise_commit_finished( ).
+*  MESSAGE s022(so).
+ENDIF.
+
+  MODIFY zspare_cons_appr FROM table it_final .
+  IF sy-subrc = 0.
+    COMMIT WORK AND WAIT.
+*    MESSAGE 'Order Sent For Approval.Please check the Table for Progress' TYPE 'S'.
+  ENDIF.
+
+
+*agent = 'vamsi.mudunuri@aplusatech.com'.
+*swc_set_element container 'agent' agent.
+*user = 'USEXMUDUVA'.
+*swc_set_element container 'USER' user.
+end_method.
+
+Program : 
+  INCLUDE <cntn01>.
+  DATA: object    TYPE swc_object,
+        size      TYPE i,
+        solix_tab TYPE solix_tab,
+        objhead   TYPE soli_tab.
+  DATA l_xstring TYPE xstring.
+  swc_container lt_container. "declare container
+
+*  " Pass the internal table to the workflow container (example using a function module)
+*  CALL FUNCTION 'SWE_EVENT_CREATE'
+*    EXPORTING
+*      event_name = 'MY_TABLE' " Replace with your event name
+*      event_container = lt_mtable. " Pass the internal table
+
+  DATA: return_code     TYPE syst_subrc,
+        workitem_id     TYPE sww_wiid,
+        input_container TYPE STANDARD TABLE OF swr_cont,
+        ls_cont_in      TYPE  swr_cont,
+        message_lines   TYPE STANDARD TABLE OF swr_messag,
+        message_struct  TYPE STANDARD TABLE OF swr_mstruc.
+
+
+  DATA:
+    lv_object      LIKE  swr_struct-object_typ,
+    lv_objkey      LIKE  swr_struct-object_key,
+    lv_event       LIKE  swr_struct-event,
+    lv_commit      LIKE  swr_struct-commitflag VALUE 'X',
+    lv_return_code LIKE  sy-subrc,
+    lv_ret_code    TYPE syst_subrc.
+
+  LOOP AT it_final INTO wa_final.
+
+at END OF order_no.
+
+  lv_object = 'ZSPARE_APR'.
+  lv_objkey = wa_final-order_no.
+  lv_event = 'ZSPARE_EVENT'.
+*user = 'USEXMUDUVA'.
+
+**** Pass details to Work Flow Container
+  CLEAR: ls_cont_in.
+  MOVE 'agent' TO ls_cont_in-element.
+  MOVE 'vamsi.mudunuri@aplusatech.com' TO ls_cont_in-value.
+  APPEND ls_cont_in TO input_container.
+
+**** Pass details to Work Flow Container
+  CLEAR: ls_cont_in.
+  MOVE 'USER' TO ls_cont_in-element.
+  MOVE 'USEXMUDUVA' TO ls_cont_in-value.
+  APPEND ls_cont_in TO input_container.
+
+  CLEAR: ls_cont_in.
+  MOVE 'Ord_number' TO ls_cont_in-element.
+  MOVE wa_final-order_no TO ls_cont_in-value.
+  APPEND ls_cont_in TO input_container.
+
+  CALL FUNCTION 'SAP_WAPI_CREATE_EVENT'
+    EXPORTING
+      object_type    = lv_object
+      object_key     = lv_objkey
+      event          = lv_event
+*     commit_work    = lv_commit
+      event_language = sy-langu
+      language       = sy-langu
+      user           = sy-uname
+*     IFS_XML_CONTAINER       =
+    IMPORTING
+      return_code    = lv_ret_code
+*     event_id       = lv_ev
+    TABLES
+     input_container = input_container
+      message_lines  = message_lines
+      message_struct = message_struct.
+
+
+  IF return_code = 0.
+    COMMIT WORK.
+    MESSAGE s899(v1) WITH 'Work FLow trigger successfully.'   ##NO_TEXT.
+  ELSE.
+    MESSAGE i899(v1) WITH 'No Work FLow trigger. Please check with SAP IT Team.'   ##NO_TEXT.
+  ENDIF.
+  ENDAT.
+  ENDLOOP.
