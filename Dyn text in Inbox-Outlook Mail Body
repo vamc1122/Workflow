@@ -1,0 +1,41 @@
+lv_wrk_id = Workitem(Workflow Container)-workitemid.
+
+IF lv_wrk_id IS NOT INITIAL.
+  SELECT * FROM sww_wi2obj
+    INTO TABLE lt_items
+    WHERE wi_rh_task = 'TS08900001'
+      AND top_wi_id = lv_wrk_id.
+  IF lt_items IS NOT INITIAL.
+    READ TABLE lt_items INTO ls_item WITH KEY catid = 'BO' typeid = 'SOFM'.
+    IF sy-subrc = 0.
+      lv_object_id = ls_item-instid. " This is your Document ID
+    ENDIF.
+    DATA: ls_doc_data TYPE sofolenti1,
+          lt_text     TYPE TABLE OF solisti1,
+          ls_text     TYPE solisti1.
+    CALL FUNCTION 'SO_DOCUMENT_READ_API1'
+      EXPORTING
+        document_id                = lv_object_id
+      IMPORTING
+        document_data              = ls_doc_data
+      TABLES
+        object_content             = lt_text
+      EXCEPTIONS
+        document_id_not_exist      = 1
+        operation_no_authorization = 2
+        x_error                    = 3
+        OTHERS                     = 4.
+    IF sy-subrc = 0.
+      " Loop through the table to read the lines of the rejection text
+      LOOP AT lt_text INTO ls_text.
+        " ls_text-line contains your text row
+        IF lv_reason IS INITIAL.
+          lv_reason = ls_text-line.
+        ELSE.
+          " Concatenate the next line with a space separator
+          lv_reason = |{ lv_reason } { ls_text-line }|.
+        ENDIF.
+      ENDLOOP.
+    ENDIF.
+  ENDIF.
+ENDIF.
