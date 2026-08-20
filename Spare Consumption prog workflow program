@@ -1,0 +1,340 @@
+*&---------------------------------------------------------------------*
+*& Report  ZPM_WF_SPARE_CONS_VALUE_APPR
+*&
+*&---------------------------------------------------------------------*
+*&
+*&
+*&---------------------------------------------------------------------*
+REPORT zpm_approve_reject_report.
+TABLES : resb.
+TYPES: BEGIN OF ty_resb,
+         aufnr  TYPE aufnr,
+         rsnum  TYPE rsnum,
+         rspos  TYPE rspos,
+         bdmng  TYPE bdmng,
+         gpreis TYPE ppcomp,
+       END OF ty_resb.
+
+DATA: lv_rspos TYPE rspos.
+
+DATA: it_resb TYPE TABLE OF ty_resb, wa_resb TYPE ty_resb.
+DATA: it_final TYPE TABLE OF zspare_cons_appr,
+      wa_final TYPE zspare_cons_appr.
+DATA : it_aufk TYPE TABLE OF aufk,
+       wa_aufk TYPE aufk.
+DATA : it_rsadd TYPE STANDARD TABLE OF rsadd,
+       wa_rsadd TYPE rsadd.
+
+DATA: it_fieldcat TYPE TABLE OF slis_fieldcat_alv, wa_fieldcat TYPE slis_fieldcat_alv.
+
+DATA : ls_mtable TYPE zspare_cons_str.
+DATA : lt_mtable TYPE zspare_cons_tt.
+
+TABLES: aufk.
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE text-001.
+SELECT-OPTIONS: s_ord_no FOR aufk-aufnr .
+SELECT-OPTIONS: s_aedat FOR aufk-aedat DEFAULT sy-datum.
+SELECT-OPTIONS : s_res_no FOR resb-rsnum NO-DISPLAY.
+
+*SELECT-OPTIONS: s_item FOR lv_rspos." OBLIGATORY.
+
+*  SELECTION-SCREEN skip.
+*  SELECTION-SCREEN PUSHBUTTON /5(10) b_disp USER-COMMAND DISP1.
+*  SELECTION-SCREEN skip.
+*  SELECTION-SCREEN PUSHBUTTON /5(10) b_save USER-COMMAND SAVE1.
+SELECTION-SCREEN SKIP.
+PARAMETERS: p_rb1 RADIOBUTTON GROUP rb1,
+            p_rb2 RADIOBUTTON GROUP rb1,
+            p_rb3 RADIOBUTTON GROUP rb1.
+SELECTION-SCREEN END OF BLOCK b1.
+
+INITIALIZATION.
+
+AT SELECTION-SCREEN.
+  IF s_ord_no IS INITIAL AND s_aedat IS INITIAL.
+
+    MESSAGE 'Please Give Any One Input' TYPE 'E'.
+  ENDIF.
+
+
+
+
+
+
+START-OF-SELECTION.
+  IF p_rb1 = 'X'.
+    PERFORM fetch_data.
+    IF it_final IS NOT INITIAL.
+      PERFORM fill_fieldcat.
+      PERFORM display_data.
+    ELSE.
+      MESSAGE 'No Data found' TYPE 'S' DISPLAY LIKE 'E'.
+    ENDIF.
+  ELSEIF p_rb2 = 'X'. " Approve
+    PERFORM fetch_data.
+    IF it_final IS NOT INITIAL.
+      PERFORM approval.
+    ELSE.
+      MESSAGE 'No Data found' TYPE 'S' DISPLAY LIKE 'E'.
+    ENDIF.
+*  ELSEIF p_rb3 = 'X'. " Reject
+*    PERFORM fetch_data.
+*    IF it_final IS NOT INITIAL.
+*      PERFORM approval.
+*    ELSE.
+*      MESSAGE 'No Data found' TYPE 'S' DISPLAY LIKE 'E'.
+*    ENDIF.
+  ENDIF.
+
+END-OF-SELECTION.
+
+
+
+
+
+
+FORM fetch_data.
+
+  SELECT * FROM rsadd INTO TABLE  it_rsadd
+     WHERE rsnum IN s_res_no
+  AND ( creadat IN s_aedat OR changeby IN s_aedat ).
+  IF it_rsadd IS NOT INITIAL.
+    SELECT aufnr rsnum rspos bdmng gpreis FROM resb INTO TABLE it_resb FOR ALL ENTRIES IN it_rsadd
+      WHERE rsnum = it_rsadd-rsnum
+      AND xloek = ' '
+      AND werks = '1700'
+      AND aufnr IN s_ord_no
+      AND bwart = '261'.
+    IF it_resb IS NOT INITIAL.
+      SELECT * FROM aufk INTO TABLE it_aufk
+        FOR ALL ENTRIES IN it_resb
+        WHERE aufnr = it_resb-aufnr
+      AND auart LIKE 'PM%'.
+
+      SELECT * FROM zspare_cons_appr INTO TABLE @DATA(it_check)  FOR ALL ENTRIES IN @it_aufk
+      WHERE  order_no = @it_aufk-aufnr AND status IN ('In Progress', 'Approved','Rejected').
+
+      IF it_check IS NOT INITIAL.
+        SORT it_check BY order_no reservation item counter DESCENDING.
+        DELETE ADJACENT DUPLICATES FROM it_check COMPARING order_no reservation item.
+      ENDIF.
+    ENDIF.
+
+  ELSE.
+    MESSAGE 'No Data Found' TYPE 'I'.
+    LEAVE  LIST-PROCESSING.
+  ENDIF.
+  " Eoc
+
+if it_aufk is NOT INITIAL.
+  LOOP AT it_aufk INTO wa_aufk.
+    AT END OF aufnr.
+      LOOP AT it_resb INTO wa_resb WHERE aufnr = wa_aufk-aufnr.
+
+        READ TABLE it_check INTO DATA(wa_check) WITH KEY order_no = wa_resb-aufnr
+                                                         reservation = wa_resb-rsnum
+                                                         item = wa_resb-rspos.
+        IF sy-subrc = 0 AND wa_check-status = 'In Progress' .
+          CONTINUE.
+        ENDIF.
+        IF sy-subrc = 0 AND wa_check-status =  'Approved' AND wa_check-cost = ( wa_resb-bdmng * wa_resb-gpreis ).
+          CONTINUE.
+        ENDIF.
+
+        IF ( wa_resb-bdmng * wa_resb-gpreis ) LT 100000.
+          CONTINUE.
+        ENDIF.
+        CLEAR wa_final.
+        wa_final-mandt        = sy-mandt.
+        wa_final-order_no     = wa_resb-aufnr.
+        wa_final-reservation  = wa_resb-rsnum.
+        wa_final-item         = wa_resb-rspos.
+        wa_final-counter      = wa_check-counter + 1.
+        wa_final-cost         = wa_resb-bdmng * wa_resb-gpreis.
+        wa_final-status       = 'In Progress'.
+        wa_final-created_on   = sy-datum.
+        wa_final-created_time = sy-uzeit.
+        APPEND wa_final TO it_final.
+        CLEAR :wa_check,wa_resb.
+      ENDLOOP.
+    ENDAT.
+    CLEAR: wa_aufk.
+  ENDLOOP.
+ ENDIF.
+
+ENDFORM.
+
+FORM fill_fieldcat.
+  CLEAR wa_fieldcat.
+  wa_fieldcat-col_pos    = 1.
+  wa_fieldcat-fieldname  = 'ORDER_NO' .
+  wa_fieldcat-seltext_m  = 'Order No'    ##NO_TEXT.
+  APPEND wa_fieldcat TO it_fieldcat .
+  CLEAR wa_fieldcat.
+
+  CLEAR wa_fieldcat.
+  wa_fieldcat-col_pos    = 2.
+  wa_fieldcat-fieldname  = 'RESERVATION' .
+  wa_fieldcat-seltext_m  = 'Reservation No'    ##NO_TEXT.
+  APPEND wa_fieldcat TO it_fieldcat .
+  CLEAR wa_fieldcat.
+
+  CLEAR wa_fieldcat.
+  wa_fieldcat-col_pos    = 3.
+  wa_fieldcat-fieldname  = 'ITEM' .
+  wa_fieldcat-seltext_m  = 'Item No'    ##NO_TEXT.
+  APPEND wa_fieldcat TO it_fieldcat .
+  CLEAR wa_fieldcat.
+
+  CLEAR wa_fieldcat.
+  wa_fieldcat-col_pos    = 4.
+  wa_fieldcat-fieldname  = 'COST' .
+  wa_fieldcat-seltext_m  = 'Cost'    ##NO_TEXT.
+  APPEND wa_fieldcat TO it_fieldcat .
+  CLEAR wa_fieldcat.
+
+ENDFORM.
+
+FORM display_data.
+  CALL FUNCTION 'REUSE_ALV_GRID_DISPLAY'
+    EXPORTING
+      i_callback_program = sy-repid
+*     I_GRID_SETTINGS    =
+*     IS_LAYOUT          =
+      it_fieldcat        = it_fieldcat
+*     I_DEFAULT          = 'X'
+      i_save             = 'X'
+    TABLES
+      t_outtab           = it_final
+    EXCEPTIONS
+      program_error      = 1
+      OTHERS             = 2.
+  IF sy-subrc <> 0.
+* Implement suitable error handling here
+  ENDIF.
+
+  CLEAR: it_fieldcat, it_final.
+
+ENDFORM.
+
+FORM save_data.
+  MODIFY zspare_cons_appr FROM TABLE it_final.
+  IF sy-subrc = 0.
+    COMMIT WORK AND WAIT.
+    MESSAGE 'Order Sent For Approval.Please check the Table for Progress' TYPE 'S'.
+  ENDIF.
+  CLEAR it_final.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  APPROVAL
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM approval.
+
+  INCLUDE <cntn01>.
+  DATA: object    TYPE swc_object,
+        size      TYPE i,
+        solix_tab TYPE solix_tab,
+        objhead   TYPE soli_tab.
+  DATA l_xstring TYPE xstring.
+  swc_container lt_container. "declare container
+
+  DATA: return_code     TYPE syst_subrc,
+        workitem_id     TYPE sww_wiid,
+        input_container TYPE STANDARD TABLE OF swr_cont,
+        ls_cont_in      TYPE  swr_cont,
+        message_lines   TYPE STANDARD TABLE OF swr_messag,
+        message_struct  TYPE STANDARD TABLE OF swr_mstruc.
+
+
+  DATA:
+    lv_object      LIKE  swr_struct-object_typ,
+    lv_objkey      LIKE  swr_struct-object_key,
+    lv_event       LIKE  swr_struct-event,
+    lv_commit      LIKE  swr_struct-commitflag VALUE 'X',
+    lv_return_code LIKE  sy-subrc,
+    lv_ret_code    TYPE syst_subrc.
+
+  DATA : lv_header TYPE bapi_alm_order_header_e,
+         it_return TYPE TABLE OF bapiret2.
+
+  LOOP AT it_final INTO wa_final.
+
+    AT END OF order_no.
+
+      lv_object = 'ZSPARE_APR'.
+      lv_objkey = wa_final-order_no.
+      lv_event = 'ZSPARE_EVENT'.
+
+
+      CALL FUNCTION 'BAPI_ALM_ORDER_GET_DETAIL'
+        EXPORTING
+          number    = wa_final-order_no
+        IMPORTING
+          es_header = lv_header
+        TABLES
+          return    = it_return.
+
+      SELECT SINGLE * FROM zxx_generic_data INTO @DATA(lw_usmial)
+         WHERE idnt1 = @lv_header-plant
+           AND idnt1 = @lv_header-plangroup
+      AND seqno = '1'.
+*      IF lw_usmial-flval IS INITIAL AND lw_usmial-flval CS '@'.
+*        MESSAGE 'Please check Mail Id' TYPE 'E'.
+*        LEAVE LIST-PROCESSING.
+*      ENDIF.
+
+**** Pass details to Work Flow Container
+      CLEAR: ls_cont_in.
+      MOVE 'agent' TO ls_cont_in-element.
+*      MOVE 'vamsi.mudunuri@aplusatech.com' TO ls_cont_in-value.
+      MOVE 'Nirav.Trivedi@arjas.com' TO ls_cont_in-value.
+*      MOVE lw_usmial-flval TO ls_cont_in-value.
+      APPEND ls_cont_in TO input_container.
+
+**** Pass details to Work Flow Container
+      CLEAR: ls_cont_in.
+      MOVE 'USER' TO ls_cont_in-element.
+*      MOVE 'USEXMUDUVA' TO ls_cont_in-value.
+      MOVE 'USNIRATRIV' TO ls_cont_in-value.
+      APPEND ls_cont_in TO input_container.
+
+      CLEAR: ls_cont_in.
+      MOVE 'Ord_number' TO ls_cont_in-element.
+      MOVE wa_final-order_no TO ls_cont_in-value.
+      APPEND ls_cont_in TO input_container.
+
+      CALL FUNCTION 'SAP_WAPI_CREATE_EVENT'
+        EXPORTING
+          object_type     = lv_object
+          object_key      = lv_objkey
+          event           = lv_event
+*         commit_work     = lv_commit
+          event_language  = sy-langu
+          language        = sy-langu
+          user            = sy-uname
+*         IFS_XML_CONTAINER       =
+        IMPORTING
+          return_code     = lv_ret_code
+*         event_id        = lv_ev
+        TABLES
+          input_container = input_container
+          message_lines   = message_lines
+          message_struct  = message_struct.
+
+
+      IF return_code = 0.
+        COMMIT WORK.
+        MESSAGE s899(v1) WITH 'Work FLow trigger successfully.'   ##NO_TEXT.
+      ELSE.
+        MESSAGE i899(v1) WITH 'No Work FLow trigger. Please check with SAP IT Team.'   ##NO_TEXT.
+      ENDIF.
+    ENDAT.
+  ENDLOOP.
+
+
+ENDFORM.
