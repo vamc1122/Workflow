@@ -1,0 +1,351 @@
+*****           Implementation of object type ZBUS1080             *****
+INCLUDE <object>.
+BEGIN_DATA OBJECT. " Do not change.. DATA is generated
+* only private members may be inserted into structure private
+DATA:
+" begin of private,
+"   to declare private attributes remove comments and
+"   insert private attributes here ...
+" end of private,
+  BEGIN OF KEY,
+      MATERIAL LIKE MAST-MATNR,
+      PLANT LIKE MAST-WERKS,
+      BOMUSAGE LIKE MAST-STLAN,
+  END OF KEY.
+END_DATA OBJECT. " Do not change.. DATA is generated
+
+begin_method get_agents changing container.
+DATA:
+  agent01     LIKE swhactor OCCURS 0,
+  agent02     LIKE swhactor OCCURS 0,
+  email1      TYPE soxna-fullname OCCURS 0,
+  email2      TYPE soxna-fullname OCCURS 0,
+  email_init  TYPE soxna-fullname,
+  email_final TYPE soxna-fullname OCCURS 0,
+  wemail      TYPE soxna-fullname,
+
+  itab        TYPE TABLE OF zbom_user,
+  wtab        TYPE zbom_user,
+  ls_appr     LIKE swhactor.
+DATA : w_user TYPE bapibname-bapibname.
+DATA: lit_return  TYPE STANDARD TABLE OF bapiret2,
+      lit_addsmtp TYPE STANDARD TABLE OF bapiadsmtp,
+      lwa_addsmtp TYPE bapiadsmtp.
+DATA:change_no LIKE rc29k-aennr.
+DATA:final_app TYPE vbak-agrzr OCCURS 0.
+DATA:wa_final_app TYPE vbak-agrzr.
+DATA wf_initiator TYPE wfsyst-initiator.
+DATA:
+  matnr   TYPE mast-matnr.
+DATA:  wa_mast TYPE mast.
+DATA alt_bom TYPE rc29k-stlal.
+DATA plant TYPE mast-werks.
+DATA bomusage TYPE mast-stlan.
+DATA ls_STKO TYPE stko_api01.
+DATA valid_from TYPE csap_mbom-datuv.
+DATA tcode TYPE sy-tcode.
+
+
+swc_get_element container 'CHANGE_NO' change_no.
+swc_get_element container 'WF_INIT' wf_initiator.
+swc_get_element container 'MATNR' matnr.
+swc_get_element container 'PLANT' plant.
+swc_get_element container 'ALT_BOM' alt_bom.
+swc_get_element container 'BOMUSAGE' bomusage.
+swc_get_element container 'TCODE' tcode.
+
+*DATA : a,b.
+*a = 'X'.
+*DO .
+*  IF b = a.
+*    EXIT.
+*  ENDIF.
+*ENDDO.
+SELECT * FROM zbom_user INTO TABLE itab WHERE required = 'X'.
+DESCRIBE TABLE itab LINES DATA(lv_count).
+wa_final_app = lv_count.
+APPEND wa_final_app TO final_app.
+
+w_user = wf_initiator+2(12).
+
+CALL FUNCTION 'BAPI_USER_GET_DETAIL'
+  EXPORTING
+    username = w_user
+  TABLES
+    return   = lit_return
+    addsmtp  = lit_addsmtp.
+READ TABLE lit_addsmtp INTO lwa_addsmtp INDEX 1.
+IF lwa_addsmtp-e_mail IS NOT INITIAL.
+  MOVE lwa_addsmtp-e_mail TO email_init.
+ENDIF.
+
+
+if tcode = 'CS02'.
+SELECT SINGLE * FROM mast INTO wa_mast
+   WHERE matnr = matnr
+   AND werks = plant
+   AND stlal = alt_bom
+   AND stlan = bomusage.
+IF sy-subrc = 0.
+  SELECT SINGLE * FROM stko INTO @DATA(wa_stko)
+    WHERE stlnr = @wa_mast-stlnr
+    AND stlal = @alt_bom.
+ENDIF.
+ls_STKO-bom_status = '02'.
+ls_STKO-base_quan = wa_stko-bmeng.
+REPLACE ALL OCCURRENCES OF '.' IN ls_STKO-base_quan WITH ','.
+valid_from = |{ sy-datum DATE = USER }|.
+CALL FUNCTION 'CSAP_MAT_BOM_MAINTAIN'
+  EXPORTING
+    material           = wa_mast-matnr
+    plant              = wa_mast-werks
+    bom_usage          = wa_mast-stlan
+    alternative        = wa_mast-stlal
+    valid_from         = valid_from
+    change_no          = change_no
+    i_stko             = ls_STKO
+    fl_commit_and_wait = 'X'
+    fl_default_values  = 'X'
+  EXCEPTIONS
+    error              = 1
+    OTHERS             = 2.
+IF sy-subrc <> 0.
+* Implement suitable error handling here
+ENDIF.
+ENDIF.
+
+swc_set_element container 'EMAIL_INIT' email_init.
+swc_set_table container 'FINAL_APPROVAL' final_app.
+end_method.
+
+begin_method update_status changing container.
+
+DATA:
+  matnr   TYPE mast-matnr,
+  wa_mast TYPE mast.
+DATA:change_no LIKE rc29k-aennr.
+DATA alt_bom TYPE rc29k-stlal.
+DATA plant TYPE mast-werks.
+DATA bomusage TYPE mast-stlan.
+DATA ls_STKO TYPE stko_api01.
+DATA valid_from TYPE csap_mbom-datuv.
+DATA tcode TYPE sy-tcode.
+*DATA : a,b.
+*a = 'X'.
+*DO .
+*if b = a.
+*  exit.
+*ENDIF.
+*ENDDO.
+
+swc_get_element container 'CHANGE_NO' change_no.
+swc_get_element container 'MATNR' matnr.
+swc_get_element container 'ALT_BOM' alt_bom.
+swc_get_element container 'PLANT' plant.
+swc_get_element container 'BOMUSAGE' bomusage.
+swc_get_element container 'TCODE' tcode.
+
+if tcode = 'CS02' or tcode = 'CS01'.
+SELECT SINGLE * FROM mast INTO wa_mast
+   WHERE matnr = matnr
+   AND werks = plant
+   AND stlal = alt_bom
+   AND stlan = bomusage.
+IF sy-subrc = 0.
+  SELECT SINGLE * FROM stko INTO @DATA(wa_stko)
+    WHERE stlnr = @wa_mast-stlnr
+    AND stlal = @alt_bom.
+ENDIF.
+ls_STKO-bom_status = '01'.
+ls_STKO-base_quan = wa_stko-bmeng.
+REPLACE ALL OCCURRENCES OF '.' IN ls_STKO-base_quan WITH ','.
+valid_from = |{ sy-datum DATE = USER }|.
+CALL FUNCTION 'CSAP_MAT_BOM_MAINTAIN'
+  EXPORTING
+    material           = wa_mast-matnr
+    plant              = wa_mast-werks
+    bom_usage          = wa_mast-stlan
+    alternative        = wa_mast-stlal
+    valid_from         = valid_from
+    change_no          = change_no
+    i_stko             = ls_STKO
+    fl_commit_and_wait = 'X'
+    fl_default_values  = 'X'
+  EXCEPTIONS
+    error              = 1
+    OTHERS             = 2.
+IF sy-subrc <> 0.
+* Implement suitable error handling here
+ENDIF.
+ENDIF.
+
+
+*IF NOT change_no IS INITIAL.
+*  UPDATE stko SET stlst = '01'
+*        WHERE aennr = change_no.
+**        and stlal = alt_bom.
+*ELSE.
+*  UPDATE stko SET stlst = '01'
+*        WHERE stlnr = wa_mast-stlnr.
+**        AND stlal = alt_bom.
+*ENDIF.
+
+end_method.
+
+begin_method restore_data changing container.
+
+DATA: it_mast     TYPE TABLE OF mast,
+      wa_mast     TYPE mast,
+      wa_old_data TYPE zcs02,
+      it_stpo     TYPE TABLE OF  stpo,
+      wa_stpo     TYPE stpo,
+      it_stko     TYPE TABLE OF stko,
+      wa_stko     TYPE stko,
+      wa_cs02     TYPE zcs02.
+
+
+DATA:change_no LIKE rc29k-aennr.
+
+swc_get_element container 'CHANGE_NO' change_no.
+
+SELECT SINGLE * FROM mast INTO wa_mast WHERE
+    matnr = object-key-material
+AND werks = object-key-plant
+AND stlan = object-key-bomusage.
+
+SELECT * FROM stpo INTO TABLE it_stpo WHERE
+         stlnr = wa_mast-stlnr
+         AND aennr = change_no.
+
+LOOP AT it_stpo INTO wa_stpo.
+  SELECT SINGLE * FROM zcs02 INTO wa_cs02
+   WHERE  stlty = wa_stpo-stlty
+    AND stlnr = wa_stpo-stlnr
+    AND stlkn = wa_stpo-stlkn
+    AND stpoz = wa_stpo-stpoz.
+  IF sy-subrc = 0.
+    UPDATE stpo SET menge = wa_cs02-menge
+      WHERE stlty = wa_stpo-stlty
+      AND stlnr = wa_stpo-stlnr
+      AND stlkn = wa_stpo-stlkn
+      AND stpoz = wa_stpo-stpoz.
+  ELSE.
+    MODIFY stpo FROM wa_stpo.
+  ENDIF.
+
+
+  SELECT SINGLE * FROM zcs02 INTO wa_cs02
+   WHERE  stlty = wa_stpo-stlty
+    AND stlnr = wa_stpo-stlnr
+    AND stlkn = wa_stpo-stlkn
+    AND stpoz = wa_stpo-stpoz
+    AND vbkz = 'I'.
+  IF sy-subrc = 0.
+    DELETE FROM stpo
+      WHERE stlty = wa_stpo-stlty
+      AND stlnr = wa_stpo-stlnr
+      AND stlkn = wa_stpo-stlkn
+      AND stpoz = wa_stpo-stpoz.
+  ENDIF.
+ENDLOOP.
+
+
+SELECT SINGLE * FROM zcs02 INTO wa_old_data
+ WHERE stlnr = wa_mast-stlnr.
+IF sy-subrc = 0.
+  IF wa_old_data-bmenge_old > 1.
+    UPDATE stko SET bmeng = wa_old_data-bmenge_old
+      WHERE stlnr = wa_stpo-stlnr.
+  ENDIF.
+ENDIF.
+
+end_method.
+
+
+begin_method zcs03 changing container.
+
+DATA:  wa_mast TYPE mast.
+SET PARAMETER ID 'MAT' FIELD object-key-material.
+SET PARAMETER ID 'WRK' FIELD object-key-plant.
+SET PARAMETER ID 'CSV' FIELD object-key-bomusage.
+
+SELECT SINGLE * FROM mast INTO wa_mast WHERE matnr = object-key-material.
+
+CALL TRANSACTION 'CS03' AND SKIP FIRST SCREEN.
+
+end_method.
+
+begin_method get_level_data changing container.
+DATA:
+  lv_counter TYPE vbak-agrzr,
+  agent_id   TYPE soxna-fullname,
+  agent      TYPE wfsyst-agent,
+  ls_appr    LIKE swhactor,
+  change_no  TYPE rc29k-aennr,
+  wa_log     TYPE zpp_bom_wf_log,
+  curr_level TYPE zpp_bom_wf_log-app_lvl,
+  it_log     TYPE TABLE OF zpp_bom_wf_log.
+swc_get_element container 'LV_COUNTER' lv_counter.
+swc_get_element container 'CHANGE_NO' change_no.
+*DATA : a,b.
+*a = 'X'.
+*DO .
+*if b = a.
+*  exit.
+*ENDIF.
+*ENDDO.
+IF lv_counter IS INITIAL.
+  lv_counter = '01'.
+ENDIF.
+CLEAR :ls_appr,agent_id,agent.
+SELECT * FROM zbom_user INTO TABLE @DATA(itab) WHERE required = 'X'.
+SORT itab BY zlevel.
+DATA lv_count TYPE sy-index.
+CLEAR lv_count.
+lv_count = lv_counter.
+READ TABLE itab INTO DATA(wtab) INDEX lv_count.
+
+CONCATENATE 'US' wtab-zuser INTO agent.
+MOVE wtab-zemail_id TO agent_id.
+curr_level = lv_count.
+wa_log-mandt = sy-mandt.
+wa_log-aennr = change_no.
+wa_log-app_lvl = wtab-zlevel.
+wa_log-usrid   = wtab-zuser.
+wa_log-stats   = 'P'.
+wa_log-erdat   = sy-datum.
+wa_log-erzet   = sy-uzeit.
+wa_log-remrk   = 'Sent for Level 1 Approval'.
+APPEND wa_log TO it_log.
+
+MODIFY zpp_bom_wf_log FROM TABLE it_log.
+
+swc_set_element container 'AGENT_ID' agent_id.
+swc_set_element container 'AGENT' agent.
+swc_set_element container 'CURR_LEVEL' curr_level.
+swc_set_element container 'LV_COUNTER' lv_counter.
+
+CLEAR :wtab,itab,wa_log,it_log.
+
+end_method.
+
+begin_method approved changing container.
+DATA:
+  curr_level TYPE zpp_bom_wf_log-app_lvl,
+  change_no  LIKE rc29k-aennr.
+swc_get_element container 'curr_level' curr_level.
+swc_get_element container 'CHANGE_NO' change_no.
+
+
+SELECT SINGLE * FROM zpp_bom_wf_log INTO  @DATA(wab)
+  WHERE app_lvl = @curr_level AND aennr = @change_no.
+
+wab-mandt = sy-mandt.
+wab-stats   = 'A'.
+wab-erdat   = sy-datum.
+wab-erzet   = sy-uzeit.
+wab-remrk   = |level { curr_level } Approved |.
+
+MODIFY zpp_bom_wf_log FROM wab.
+CLEAR wab.
+end_method.
